@@ -4,7 +4,7 @@ import cPickle as pickle
 import matplotlib.pyplot as plt
 from IPython import embed
 from astropy.io import fits
-from scipy.interpolate import interp1d
+from scipy.interpolate import UnivariateSpline
 
 """
 A bunch of handy utilities for working with the Nearby Supernova Factory
@@ -38,7 +38,7 @@ class Dataset(object):
         """
         Returns a random list of supernovae of length n
         """
-        if n==1:
+        if n == 1:
             return np.random.choice(self.sne, 1)[0]
         else:
             return np.random.choice(self.sne, size=n, replace=False)
@@ -103,7 +103,10 @@ class Spectrum(object):
         flux = f[0].data
         err = f[1].data
         f.close()
-        wave = np.linspace(head['CRVAL1'], head['CRVAL1']+head['CDELT1']*len(flux), len(flux)+1)[:-1]
+        start = head['CRVAL1']
+        end = head['CRVAL1']+head['CDELT1']*len(flux)
+        npts = len(flux)+1
+        wave = np.linspace(start, end, npts)[:-1]
         return wave, flux, err
 
     def get_smoothed_rf_spec(self, n_l=30, smooth_fac=0.005):
@@ -124,7 +127,8 @@ class Spectrum(object):
         w = w[(w > l_range[0]) & (w < l_range[1])]
         return w, f, e
 
-    def get_smoothed_feature_spec(self, l_range=(5685, 6570), n_l=30, smooth_fac=0.005):
+    def get_smoothed_feature_spec(self, l_range=(5685, 6570), n_l=30,
+                                  smooth_fac=0.005):
         """
         Returns the smoothed feature spectrum.
         """
@@ -132,20 +136,53 @@ class Spectrum(object):
         w_s, f_s = self.smooth_spec(w, f, e, n_l=n_l, smooth_fac=smooth_fac)
         return w_s, f_s
 
-    def get_interp_feature_spec(self, l_range=(5685, 6570), n_l=30, smooth_fac=0.005, grid=0.1):
+    def get_interp_feature_spec(self, l_range=(5685, 6570), n_l=30,
+                                smooth_fac=0.005, grid=0.1,
+                                return_spl=False):
         """
         Returns the spline interpolated, smoothed feature spectrum
         """
-        w, f = self.get_smoothed_feature_spec(l_range=l_range, n_l=n_l, smooth_fac=smooth_fac)
-        int_func = interp1d(w, f, kind='cubic')
+        w, f = self.get_smoothed_feature_spec(l_range=l_range, n_l=n_l,
+                                              smooth_fac=smooth_fac)
+        spl = UnivariateSpline(w, f, k=4, s=0)
         n_pts = (max(w)-min(w))/grid + 1
         w_int = np.linspace(min(w), max(w), n_pts)
-        f_int = int_func(w_int)
-        return w_int, f_int
+        f_int = spl(w_int)
+        if return_spl:
+            return w_int, f_int, spl
+        else:
+            return w_int, f_int
+
+    def find_peaks(self, l_range=(5685, 6570), n_l=30, smooth_fac=0.005,
+                   grid=0.1):
+        """
+        Finds the peak absorption and emission in specified profile.
+        """
+        w, f, spl = self.get_interp_feature_spec(l_range=l_range, n_l=n_l,
+                                                 smooth_fac=smooth_fac,
+                                                 grid=grid,
+                                                 return_spl=True)
+        roots = spl.derivative().roots()
+        peaks = spl(roots)
+        return roots, peaks
 
 
 if __name__ == '__main__':
     d = Dataset()
-    sn = d.random_sne()
-    spec = sn.get_spec_nearest_max()
-    embed()
+    for sn in d.sne:
+        print sn.target_name
+        spec = sn.get_spec_nearest_max()
+        w, f, e = spec.get_feature_spec()
+        plt.plot(w, f, 'b-', alpha=0.5)
+        try:
+            w_int, f_int = spec.get_interp_feature_spec()
+        except:
+            continue
+        plt.plot(w_int, f_int, 'k-')
+        roots, peaks = spec.find_peaks()
+        plt.plot(roots, peaks, 'ro')
+        plt.xlabel('Wavelength [$\AA$]')
+        plt.ylabel('Flux [erg/s/cm$^2$/$\AA$]')
+        plt.title(sn.target_name)
+        plt.savefig('/Users/samdixon/repos/velocities/plots/'+sn.target_name+'.png')
+        plt.close()
