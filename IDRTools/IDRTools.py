@@ -1,7 +1,10 @@
 import os
 import numpy as np
 import cPickle as pickle
+import matplotlib.pyplot as plt
 from IPython import embed
+from astropy.io import fits
+
 
 """
 A bunch of handy utilities for working with the Nearby Supernova Factory
@@ -68,14 +71,43 @@ class Spectrum(object):
         wave = np.linspace(head['CRVAL1'], head['CRVAL1']+head['CDELT1']*len(flux), len(flux)+1)[:-1]
         return wave, flux, err
 
-    def plot_rf_spec(self, err=False, save=None):
+    def get_smoothed_rf_spec(self, n_l=30, smooth_fac=0.005):
+        """
+        Returns the smoothed restframe spectrum info using the algorithm from
+        Blondin et al 2007.
+        """
+        wave, f_sn, f_var = self.get_rf_spec()
+        f_ts = []
+        for i in range(n_l/2, len(f_sn)-n_l/2):
+            sig = wave[i]*smooth_fac
+            sub = range(i-n_l/2, i+n_l/2)
+            x = wave[i]-wave[sub]
+            g = 1/np.sqrt(2*np.pi)*np.exp(-1/sig**2*x**2)
+            w = g/f_var[sub]
+            f_ts_i = np.dot(w, f_sn[sub])/np.sum(w)
+            f_ts.append(f_ts_i)
+        return wave[n_l/2:-n_l/2], np.array(f_ts)
+
+
+    def plot_rf_spec(self, err=False, save=None, show=True):
         """
         Plots the restframe spectrum
         """
         w, f, e = self.get_rf_spec()
-        plt.plot(w, f, 'k-')
+        plt.plot(w, f, 'b-', alpha=0.5)
         if err:
             plt.fill_between(w, f-e, f+e, color='b', alpha=0.5)
+        if save is not None:
+            plt.savefig(save, bbox_inches='tight')
+        elif show:
+            plt.show()
+
+    def plot_smoothed_rf_spec(self, n_l=30, smooth_fac=0.005, save=None):
+        """
+        Plots the restframe spectrum
+        """
+        w_s, f_ts = self.get_smoothed_rf_spec(n_l=n_l, smooth_fac=smooth_fac)
+        plt.plot(w_s, f_ts, 'k-')
         if save is not None:
             plt.savefig(save, bbox_inches='tight')
         else:
