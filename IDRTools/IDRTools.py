@@ -4,7 +4,7 @@ import cPickle as pickle
 import matplotlib.pyplot as plt
 from IPython import embed
 from astropy.io import fits
-
+from scipy.interpolate import interp1d
 
 """
 A bunch of handy utilities for working with the Nearby Supernova Factory
@@ -13,6 +13,7 @@ Internal Data Release.
 
 IDR_dir = '/Users/samdixon/repos/snifs/ALLEG2a_SNeIa'
 META = os.path.join(IDR_dir, 'META.pkl')
+
 
 class Dataset(object):
 
@@ -29,9 +30,18 @@ class Dataset(object):
         else:
             self.data = self.meta
         self.sne_names = self.data.keys()
-        self.sne = [Supernova(v) for k, v in self.data.iteritems()]
+        self.sne = [Supernova(v) for v in self.data.itervalues()]
         for k, v in self.data.iteritems():
             setattr(self, k, Supernova(v))
+
+    def random_sne(self, n=1):
+        """
+        Returns a random list of supernovae of length n
+        """
+        if n==1:
+            return np.random.choice(self.sne, 1)[0]
+        else:
+            return np.random.choice(self.sne, size=n, replace=False)
 
 
 class Supernova(object):
@@ -44,11 +54,10 @@ class Supernova(object):
 
     def get_spec_nearest_max(self):
         """
-        Return the spectrum object for the observation closest to B-band max
+        Returns the spectrum object for the observation closest to B-band max.
         """
-        min_phase = min(s.salt2_phase for s in self.spectra if s.salt2_phase>0)
+        min_phase = min(s.salt2_phase for s in self.spectra if s.salt2_phase > 0)
         return [s for s in self.spectra if s.salt2_phase == min_phase][0]
-
 
 
 class Spectrum(object):
@@ -58,9 +67,35 @@ class Spectrum(object):
             k = k.replace('.', '_')
             setattr(self, k, v)
 
+    def vel_space(self, wave, l_range=(5685, 6570), l0=6355):
+        """
+        Returns the feature spectrum in velocity space using the relativistic
+        Doppler formula (units are km/s).
+        """
+        c = 3e5  # speed of light in km/s
+        dl = wave-l0
+        ddl = dl/l0
+        v = c*((ddl+1)**2-1)/((ddl+1)**2+1)
+        return v
+
+    def smooth_spec(self, wave, f_sn, f_var, n_l=30, smooth_fac=0.005):
+        """
+        Smooth the input spectrum using the algorithm from Blondin et al 2007.
+        """
+        f_ts = []
+        for i in range(n_l/2, len(f_sn)-n_l/2):
+            sig = wave[i]*smooth_fac
+            sub = range(i-n_l/2, i+n_l/2)
+            x = wave[i]-wave[sub]
+            g = 1/np.sqrt(2*np.pi)*np.exp(-1/sig**2*x**2)
+            w = g/f_var[sub]
+            f_ts_i = np.dot(w, f_sn[sub])/np.sum(w)
+            f_ts.append(f_ts_i)
+        return wave[n_l/2:-n_l/2], np.array(f_ts)
+
     def get_rf_spec(self):
         """
-        Returns the restframe spectrum info from the IDR FITS files
+        Returns the restframe spectrum info from the IDR FITS files.
         """
         path = os.path.join(IDR_dir, self.idr_spec_restframe)
         f = fits.open(path)
@@ -73,47 +108,44 @@ class Spectrum(object):
 
     def get_smoothed_rf_spec(self, n_l=30, smooth_fac=0.005):
         """
-        Returns the smoothed restframe spectrum info using the algorithm from
-        Blondin et al 2007.
-        """
-        wave, f_sn, f_var = self.get_rf_spec()
-        f_ts = []
-        for i in range(n_l/2, len(f_sn)-n_l/2):
-            sig = wave[i]*smooth_fac
-            sub = range(i-n_l/2, i+n_l/2)
-            x = wave[i]-wave[sub]
-            g = 1/np.sqrt(2*np.pi)*np.exp(-1/sig**2*x**2)
-            w = g/f_var[sub]
-            f_ts_i = np.dot(w, f_sn[sub])/np.sum(w)
-            f_ts.append(f_ts_i)
-        return wave[n_l/2:-n_l/2], np.array(f_ts)
-
-
-    def plot_rf_spec(self, err=False, save=None, show=True):
-        """
-        Plots the restframe spectrum
+        Returns the smoothed restframe spectrum.
         """
         w, f, e = self.get_rf_spec()
-        plt.plot(w, f, 'b-', alpha=0.5)
-        if err:
-            plt.fill_between(w, f-e, f+e, color='b', alpha=0.5)
-        if save is not None:
-            plt.savefig(save, bbox_inches='tight')
-        elif show:
-            plt.show()
+        w_s, f_s = self.smooth_spec(w, f, e, n_l=n_l, smooth_fac=smooth_fac)
+        return w_s, f_s
 
-    def plot_smoothed_rf_spec(self, n_l=30, smooth_fac=0.005, save=None):
+    def get_feature_spec(self, l_range=(5685, 6570)):
         """
-        Plots the restframe spectrum
+        Returns a feature spectrum in l_range.
         """
-        w_s, f_ts = self.get_smoothed_rf_spec(n_l=n_l, smooth_fac=smooth_fac)
-        plt.plot(w_s, f_ts, 'k-')
-        if save is not None:
-            plt.savefig(save, bbox_inches='tight')
-        else:
-            plt.show()
+        w, f, e = self.get_rf_spec()
+        f = f[(w > l_range[0]) & (w < l_range[1])]
+        e = e[(w > l_range[0]) & (w < l_range[1])]
+        w = w[(w > l_range[0]) & (w < l_range[1])]
+        return w, f, e
+
+    def get_smoothed_feature_spec(self, l_range=(5685, 6570), n_l=30, smooth_fac=0.005):
+        """
+        Returns the smoothed feature spectrum.
+        """
+        w, f, e = self.get_feature_spec(l_range=l_range)
+        w_s, f_s = self.smooth_spec(w, f, e, n_l=n_l, smooth_fac=smooth_fac)
+        return w_s, f_s
+
+    def get_interp_feature_spec(self, l_range=(5685, 6570), n_l=30, smooth_fac=0.005, grid=0.1):
+        """
+        Returns the spline interpolated, smoothed feature spectrum
+        """
+        w, f = self.get_smoothed_feature_spec(l_range=l_range, n_l=n_l, smooth_fac=smooth_fac)
+        int_func = interp1d(w, f, kind='cubic')
+        n_pts = (max(w)-min(w))/grid + 1
+        w_int = np.linspace(min(w), max(w), n_pts)
+        f_int = int_func(w_int)
+        return w_int, f_int
 
 
 if __name__ == '__main__':
     d = Dataset()
+    sn = d.random_sne()
+    spec = sn.get_spec_nearest_max()
     embed()
