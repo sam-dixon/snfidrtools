@@ -65,12 +65,6 @@ class Spectrum(object):
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
-        try:
-            roots, peaks = self.get_interp_feature_spec()
-            self.l_abs = roots[peaks == min(peaks)]
-            self.v_abs = self.vel_space(self.l_abs)
-        except:
-            pass
 
     def get_rf_spec(self):
         """
