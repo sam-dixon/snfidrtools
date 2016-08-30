@@ -63,7 +63,8 @@ class Supernova(object):
 
     def get_distance_mod(self):
         """
-        Returns the distance modulus using the Kessler 2009 formulation.
+        Returns the distance modulus from the SALT2 fit parameters using the
+        Kessler 2009 formulation.
         """
         mbstar = self.salt2_RestFrameMag_0_B
         alpha, beta = 0.121, 2.63
@@ -79,7 +80,7 @@ class Supernova(object):
         """
         mu_sn = self.mu
         z = self.salt2_Redshift
-        mu_cosmo = cosmo.distmod(z=z)
+        mu_cosmo = cosmo.distmod(z=z).value
         return mu_sn - mu_cosmo
 
 
