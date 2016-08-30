@@ -4,6 +4,7 @@ import cPickle as pickle
 import matplotlib.pyplot as plt
 from IPython import embed
 from astropy.io import fits
+from astropy import cosmology
 
 """
 A bunch of handy utilities for working with the Nearby Supernova Factory
@@ -49,14 +50,37 @@ class Supernova(object):
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
+        self.mu = self.get_distance_mod()
+        self.hr = self.get_hubble_resid()
         self.spectra = [Spectrum(obs) for obs in self.spectra.itervalues()]
 
     def get_spec_nearest_max(self):
         """
         Returns the spectrum object for the observation closest to B-band max.
         """
-        min_phase = min(np.abs(s.salt2_phase) for s in self.spectra if s.salt2_phase > 0)
+        min_phase = min(np.abs(s.salt2_phase) for s in self.spectra)
         return [s for s in self.spectra if s.salt2_phase == min_phase][0]
+
+    def get_distance_mod(self):
+        """
+        Returns the distance modulus using the Kessler 2009 formulation.
+        """
+        mbstar = self.salt2_RestFrameMag_0_B
+        alpha, beta = 0.121, 2.63
+        m0 = -19.157
+        x1 = self.salt2_X1
+        c = self.salt2_Color
+        mu = mbstar-m0+alpha*x1-beta*c
+        return mu
+
+    def get_hubble_resid(self, cosmo=cosmology.Planck13):
+        """
+        Returns the Hubble residual using a given cosmology.
+        """
+        mu_sn = self.mu
+        z = self.salt2_Redshift
+        mu_cosmo = cosmo.distmod(z=z)
+        return mu_sn - mu_cosmo
 
 
 class Spectrum(object):
