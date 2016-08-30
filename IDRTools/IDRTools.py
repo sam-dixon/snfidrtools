@@ -53,6 +53,9 @@ class Supernova(object):
         self.mu = self.get_distance_mod()
         self.hr = self.get_hubble_resid()
         self.spectra = [Spectrum(obs) for obs in self.spectra.itervalues()]
+        # Sort spectra by SALT2 phase
+        self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
+
 
     def get_spec_nearest_max(self):
         """
