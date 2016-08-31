@@ -56,13 +56,12 @@ class Supernova(object):
         # Sort spectra by SALT2 phase
         self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
 
-
     def get_spec_nearest_max(self):
         """
         Returns the spectrum object for the observation closest to B-band max.
         """
         min_phase = min(np.abs(s.salt2_phase) for s in self.spectra)
-        return [s for s in self.spectra if s.salt2_phase == min_phase][0]
+        return [s for s in self.spectra if np.abs(s.salt2_phase) == min_phase][0]
 
     def get_distance_mod(self):
         """
