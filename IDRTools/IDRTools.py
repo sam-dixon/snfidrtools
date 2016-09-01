@@ -1,8 +1,6 @@
 import os
 import numpy as np
 import cPickle as pickle
-import matplotlib.pyplot as plt
-from IPython import embed
 from astropy.io import fits
 from astropy import cosmology
 
@@ -50,8 +48,8 @@ class Supernova(object):
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
-        self.mu = self.get_distance_mod()
-        self.hr = self.get_hubble_resid()
+        self.distance_mod()
+        self.hubble_resid()
         self.spectra = [Spectrum(obs) for obs in self.spectra.itervalues()]
         # Sort spectra by SALT2 phase
         self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
@@ -63,7 +61,7 @@ class Supernova(object):
         min_phase = min(np.abs(s.salt2_phase) for s in self.spectra)
         return [s for s in self.spectra if np.abs(s.salt2_phase) == min_phase][0]
 
-    def get_distance_mod(self):
+    def distance_mod(self):
         """
         Returns the distance modulus from the SALT2 fit parameters using the
         Kessler 2009 formulation.
@@ -74,16 +72,19 @@ class Supernova(object):
         x1 = self.salt2_X1
         c = self.salt2_Color
         mu = mbstar-m0+alpha*x1-beta*c
+        self.mu = mu
         return mu
 
-    def get_hubble_resid(self, cosmo=cosmology.Planck13):
+    def hubble_resid(self, cosmo=cosmology.Planck13):
         """
         Returns the Hubble residual using a given cosmology.
         """
         mu_sn = self.mu
         z = self.salt2_Redshift
         mu_cosmo = cosmo.distmod(z=z).value
-        return mu_sn - mu_cosmo
+        resid = mu_sn - mu_cosmo
+        self.hr = resid
+        return resid
 
 
 class Spectrum(object):
@@ -114,4 +115,3 @@ if __name__ == '__main__':
     d = Dataset()
     sn = d.random_sne()
     spec = sn.get_spec_nearest_max()
-    embed()

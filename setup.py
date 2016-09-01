@@ -9,4 +9,6 @@ setup(name='IDRTools',
       license='None',
       packages=['IDRTools'],
       install_requires=['numpy', 'matplotlib', 'IPython'],
-      zip_safe=False)
+      zip_safe=False,
+      test_suite='nose.collector',
+      tests_require=['nose'])
