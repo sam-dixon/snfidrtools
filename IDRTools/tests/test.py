@@ -54,7 +54,13 @@ class TestSpectrum(ut.TestCase):
         w, f, e = self.spec.get_rf_spec()
         self.assertEqual(len(w), len(f))
         self.assertEqual(len(f), len(e))
+        self.assertEqual(len(e), 3030)
         self.assertEqual(min(w), 3122.0)
+
+class TestMath(ut.TestCase):
+
+    def test_pcc(self):
+        self.assertEqual(int(IDRTools.math.pearson_corr_coef(xrange(30), xrange(30))), 1)
 
 if __name__ == '__main__':
     ut.main()
