@@ -11,6 +11,8 @@ Internal Data Release.
 IDR_dir = '/Users/samdixon/repos/snifs/ALLEG2a_SNeIa'
 META = os.path.join(IDR_dir, 'META.pkl')
 
+PLANCK = 6.626070040e-34
+C = 2.99792458e18
 
 class Dataset(object):
 
@@ -58,11 +60,15 @@ class Supernova(object):
         min_phase = min(np.abs(s.salt2_phase) for s in self.spectra)
         return [s for s in self.spectra if np.abs(s.salt2_phase) == min_phase][0]
 
-    def plot_lc(self, band):
+    def get_lc(self, filter_name):
         """
-        Plots the light curve in some named band
+        Finds the light curve in some SNf filter using synthetic photometry.
         """
-        pass
+        phase, mag = [], []
+        for spec in self.spectra:
+            phase.append(spec.salt2_phase)
+            mag.append(spec.get_snf_magnitude(filter_name))
+        return phase, mag
 
 
 class Spectrum(object):
@@ -87,6 +93,30 @@ class Spectrum(object):
         npts = len(flux)+1
         wave = np.linspace(start, end, npts)[:-1]
         return wave, flux, err
+
+    def get_magnitude(self, min_wave, max_wave):
+        """
+        Calculates the AB magnitude in a given top-hat filter.
+        """
+        wave, flux, flux_err = self.get_rf_spec()
+        phot_flux = flux*10**-7 / PLANCK / C * wave
+        ref_flux = 3.631e-20 * (10**-7 / PLANCK / C * wave) * (C / wave**2)
+        flux_sum = np.sum((phot_flux*2)[(wave > min_wave) & (wave < max_wave)])
+        ref_flux_sum = np.sum((ref_flux*2)[(wave > min_wave) & (wave < max_wave)])
+        return -2.5*np.log10(flux_sum/ref_flux_sum)
+
+    def get_snf_magnitude(self, filter_name):
+        """
+        Calculates the AB magnitude in a given SNf filter.
+        """
+        filter_edges = {'u' : (3300., 4102.),
+                        'b' : (4102., 5100.),
+                        'v' : (5200., 6289.),
+                        'r' : (6289., 7607.),
+                        'i' : (7607., 9200.)
+                        }
+        min_wave, max_wave = filter_edges[filter_name]
+        return self.get_magnitude(min_wave, max_wave)
 
 
 if __name__ == '__main__':
