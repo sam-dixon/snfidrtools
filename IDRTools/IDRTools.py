@@ -2,7 +2,6 @@ import os
 import numpy as np
 import cPickle as pickle
 from astropy.io import fits
-from astropy import cosmology
 
 """
 A bunch of handy utilities for working with the Nearby Supernova Factory
@@ -48,8 +47,6 @@ class Supernova(object):
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
-        self.distance_mod()
-        self.hubble_resid()
         self.spectra = [Spectrum(obs) for obs in self.spectra.itervalues()]
         # Sort spectra by SALT2 phase
         self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
@@ -61,32 +58,11 @@ class Supernova(object):
         min_phase = min(np.abs(s.salt2_phase) for s in self.spectra)
         return [s for s in self.spectra if np.abs(s.salt2_phase) == min_phase][0]
 
-    def distance_mod(self):
+    def plot_lc(self, band):
         """
-        Returns the distance modulus with error from the SALT2 fit parameters using the
-        Kessler 2009 formulation.
+        Plots the light curve in some named band
         """
-        alpha, beta, dalpha, dbeta = 0.121, 2.63, 0.027, 0.22
-        m0, dm0 = -19.157, 0.025
-        mbstar, dmbstar = self.salt2_RestFrameMag_0_B, self.salt2_RestFrameMag_0_B_err
-        x1, dx1 = self.salt2_X1, self.salt2_X1_err
-        c, dc = self.salt2_Color, self.salt2_Color_err
-        mu = mbstar-m0+alpha*x1-beta*c
-        dmu = np.sqrt(dmbstar**2+dm0**2+alpha**2*dx1**2+x1**2*dalpha**2+beta**2*dc**2+c**2*dbeta**2)
-        self.mu = mu
-        self.dmu = dmu
-        return mu, dmu
-
-    def hubble_resid(self, cosmo=cosmology.Planck13):
-        """
-        Returns the Hubble residual using a given cosmology.
-        """
-        mu_sn = self.mu
-        z = self.salt2_Redshift
-        mu_cosmo = cosmo.distmod(z=z).value
-        resid = mu_sn - mu_cosmo
-        self.hr = resid
-        return resid
+        pass
 
 
 class Spectrum(object):
