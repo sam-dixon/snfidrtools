@@ -33,9 +33,9 @@ class Dataset(object):
         else:
             self.data = data
         self.sne_names = self.data.keys()
-        self.sne = [Supernova(v, load_phren) for v in self.data.itervalues()]
-        for k, v in self.data.iteritems():
-            setattr(self, k, Supernova(v, load_phren))
+        self.sne = [Supernova(self.data, name, load_phren) for name in self.sne_names]
+        for k in self.data.iterkeys():
+            setattr(self, k, Supernova(self.data, k, load_phren))
 
     def random_sn(self, n=1):
         """
@@ -49,7 +49,8 @@ class Dataset(object):
 
 class Supernova(object):
 
-    def __init__(self, data, load_phren=True):
+    def __init__(self, dataset, name, load_phren=True, load_spec=True):
+        data = dataset[name]
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
@@ -58,9 +59,10 @@ class Supernova(object):
                 self.in_phren = True
             else:
                 self.in_phren = False
-        self.spectra = [Spectrum(obs, self.in_phren) for obs in self.spectra.itervalues()]
-        # Sort spectra by SALT2 phase
-        self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
+        if load_spec:
+            self.spectra = [Spectrum(dataset, name, obs, self.in_phren) for obs in self.spectra.iterkeys()]
+            # Sort spectra by SALT2 phase
+            self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
 
     def get_spec_nearest_max(self):
         """
@@ -109,12 +111,14 @@ class Supernova(object):
             mag.append(2.5*np.log10(flux_sum/ref_flux_sum))
         return phases, mag
 
-class Spectrum(object):
-
-    def __init__(self, data, load_phren=True):
+class Spectrum(Supernova):
+    def __init__(self, dataset, name, obs, load_phren=True):
+        data = dataset[name]['spectra'][obs]
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
+        super(Spectrum, self).__init__(dataset, name, load_phren, load_spec=False)
+
         if load_phren:
             if self.obs_exp in phren[self.target_name]['spectra'].iterkeys():
                 for k, v in phren[self.target_name]['spectra'][self.obs_exp].iteritems():
@@ -152,9 +156,12 @@ class Spectrum(object):
         end = head['CRVAL1']+head['CDELT1']*len(flux)
         npts = len(flux)+1
         wave = np.linspace(start, end, npts)[:-1]
+        # Flux is scaled by a relative distance factor to z=0.05 and multiplied by 1e15
+        # scale = sn.host_zhelio/
+        # flux = flux*1e-15/scale
         return wave, flux, err
 
-    def get_magnitude(self, min_wave, max_wave  ):
+    def get_magnitude(self, min_wave, max_wave):
         """
         Calculates the AB magnitude in a given top-hat filter.
         """
