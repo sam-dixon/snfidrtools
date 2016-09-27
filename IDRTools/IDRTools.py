@@ -3,6 +3,7 @@ import numpy as np
 import cPickle as pickle
 from astropy.io import fits
 import sncosmo
+from astropy.cosmology import Planck15 as cosmo
 from IPython import embed
 
 """
@@ -83,7 +84,8 @@ class Supernova(object):
         """
         Creates the SALT2 model spectra flux based on the fit parameters.
         """
-        model = sncosmo.Model(source='SALT2')
+        source = sncosmo.get_source('SALT2', version='2.4')
+        model = sncosmo.Model(source=source)
         model.set(z=0, t0=0, x0=self.salt2_X0, x1=self.salt2_X1, c=self.salt2_Color)
         wave = np.arange(3272, 9200, 2)
         measured_phases = [spec.salt2_phase for spec in self.spectra]
@@ -105,8 +107,8 @@ class Supernova(object):
         mag = []
         for flux in fluxes:
             ref_flux = 3.631e-20 * C * 1e8 / wave**2
-            flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-            ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+            flux_sum = np.sum((flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+            ref_flux_sum = np.sum((ref_flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
             mag.append(-2.5*np.log10(flux_sum/ref_flux_sum))
         return phases, mag
 
@@ -156,8 +158,9 @@ class Spectrum(Supernova):
         npts = len(flux)+1
         wave = np.linspace(start, end, npts)[:-1]
         #Flux is scaled by a relative distance factor to z=0.05 and multiplied by 1e15
-        scale = (self.host_zcmb/0.05)**2
-        flux = flux*1e-15/scale
+        dl = (1 + self.host_zhelio) * cosmo.comoving_transverse_distance(self.host_zcmb)
+        dlref = cosmo.luminosity_distance(0.05)
+        flux = flux / ((1+self.host_zhelio)/(1+0.05) * (dl/dlref)**2 * 1e15)
         return wave, flux, err
 
     def get_salt2_model_fluxes(self):
@@ -176,8 +179,8 @@ class Spectrum(Supernova):
         """
         wave, flux, flux_err = self.get_rf_spec()
         ref_flux = 3.631e-20 * C * 1e8 / wave**2
-        flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-        ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+        flux_sum = np.sum((flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+        ref_flux_sum = np.sum((ref_flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
         return -2.5*np.log10(flux_sum/ref_flux_sum)
 
     def get_snf_magnitude(self, filter_name, z=None):
