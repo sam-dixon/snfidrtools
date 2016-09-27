@@ -14,8 +14,8 @@ IDR_dir = '/Users/samdixon/repos/IDRTools/ALLEG2a_SNeIa'
 META = os.path.join(IDR_dir, 'META.pkl')
 PHREN = '/Users/samdixon/repos/IDRTools/phrenology_2014_04_30_BEDELLv1.pkl'
 
-PLANCK = 6.626070040e-34
-C = 2.99792458e18
+C = 2.99792458e10
+PLANCK = 6.62607e-27
 
 meta = pickle.load(open(META, 'rb'))
 phren = pickle.load(open(PHREN, 'rb'))
@@ -79,7 +79,7 @@ class Supernova(object):
         mag = [spec.get_snf_magnitude(filter_name) for spec in self.spectra]
         return phase, mag
 
-    def get_salt2_model_fluxes(self, filter_name):
+    def get_salt2_model_fluxes(self):
         """
         Creates the SALT2 model spectra flux based on the fit parameters.
         """
@@ -95,7 +95,7 @@ class Supernova(object):
         """
         Creates the SALT2 model light curve based on the fit parameters.
         """
-        phases, wave, fluxes = self.get_salt2_model_fluxes(filter_name)
+        phases, wave, fluxes = self.get_salt2_model_fluxes()
         filter_edges = {'u' : (3300., 4102.),
                         'b' : (4102., 5100.),
                         'v' : (5200., 6289.),
@@ -104,11 +104,10 @@ class Supernova(object):
         min_wave, max_wave = filter_edges[filter_name]
         mag = []
         for flux in fluxes:
-            phot_flux = flux*10**-7 / PLANCK / C * wave
-            ref_flux = 3.631e-20 * (10**-7 / PLANCK / C * wave) * (C / wave**2)
-            flux_sum = np.sum((phot_flux*2)[(wave > min_wave) & (wave < max_wave)])
-            ref_flux_sum = np.sum((ref_flux*2)[(wave > min_wave) & (wave < max_wave)])
-            mag.append(2.5*np.log10(flux_sum/ref_flux_sum))
+            ref_flux = 3.631e-20 * C * 1e8 / wave**2
+            flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+            ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+            mag.append(-2.5*np.log10(flux_sum/ref_flux_sum))
         return phases, mag
 
 class Spectrum(Supernova):
@@ -156,20 +155,29 @@ class Spectrum(Supernova):
         end = head['CRVAL1']+head['CDELT1']*len(flux)
         npts = len(flux)+1
         wave = np.linspace(start, end, npts)[:-1]
-        # Flux is scaled by a relative distance factor to z=0.05 and multiplied by 1e15
-        # scale = sn.host_zhelio/
-        # flux = flux*1e-15/scale
+        #Flux is scaled by a relative distance factor to z=0.05 and multiplied by 1e15
+        scale = (self.host_zcmb/0.05)**2
+        flux = flux*1e-15/scale
         return wave, flux, err
+
+    def get_salt2_model_fluxes(self):
+        """
+        Creates the SALT2 model spectra flux based on the fit parameters.
+        """
+        model = sncosmo.Model(source='SALT2')
+        model.set(z=0, t0=0, x0=self.salt2_X0, x1=self.salt2_X1, c=self.salt2_Color)
+        wave = np.arange(3272, 9200, 2)
+        flux = model.flux(self.salt2_phase, wave)
+        return wave, flux
 
     def get_magnitude(self, min_wave, max_wave):
         """
         Calculates the AB magnitude in a given top-hat filter.
         """
-        wave, flux, flux_err = self.get_merged_spec()
-        phot_flux = flux / PLANCK / C * wave
-        ref_flux = 3.631e-20 * (10**-7 / PLANCK / C * wave) * (C / wave**2)
-        flux_sum = np.sum((phot_flux*2)[(wave > min_wave) & (wave < max_wave)])
-        ref_flux_sum = np.sum((ref_flux*2)[(wave > min_wave) & (wave < max_wave)])
+        wave, flux, flux_err = self.get_rf_spec()
+        ref_flux = 3.631e-20 * C * 1e8 / wave**2
+        flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+        ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
         return -2.5*np.log10(flux_sum/ref_flux_sum)
 
     def get_snf_magnitude(self, filter_name, z=None):
@@ -182,14 +190,11 @@ class Spectrum(Supernova):
                         'r' : (6289., 7607.),
                         'i' : (7607., 9200.)}
         min_wave, max_wave = filter_edges[filter_name]
-        if z is not None:
-            min_wave *= 1+z
-            max_wave *= 1+z
         return self.get_magnitude(min_wave, max_wave)
 
 
 if __name__ == '__main__':
     d = Dataset()
-    sn = d.SN2004ef
+    sn = d.SN2005cf
     spec = sn.get_spec_nearest_max()
     embed()
