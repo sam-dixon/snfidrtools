@@ -60,6 +60,8 @@ class Supernova(object):
                 self.in_phren = True
             else:
                 self.in_phren = False
+        else:
+            self.in_phren = None
         if load_spec:
             self.spectra = [Spectrum(dataset, name, obs, self.in_phren) for obs in self.spectra.iterkeys()]
             # Sort spectra by SALT2 phase
@@ -107,8 +109,8 @@ class Supernova(object):
         mag = []
         for flux in fluxes:
             ref_flux = 3.631e-20 * C * 1e8 / wave**2
-            flux_sum = np.sum((flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-            ref_flux_sum = np.sum((ref_flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+            flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+            ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
             mag.append(-2.5*np.log10(flux_sum/ref_flux_sum))
         return phases, mag
 
@@ -167,7 +169,8 @@ class Spectrum(Supernova):
         """
         Creates the SALT2 model spectra flux based on the fit parameters.
         """
-        model = sncosmo.Model(source='SALT2')
+        source = sncosmo.get_source('SALT2', version='2.4')
+        model = sncosmo.Model(source=source)
         model.set(z=0, t0=0, x0=self.salt2_X0, x1=self.salt2_X1, c=self.salt2_Color)
         wave = np.arange(3272, 9200, 2)
         flux = model.flux(self.salt2_phase, wave)
@@ -179,8 +182,8 @@ class Spectrum(Supernova):
         """
         wave, flux, flux_err = self.get_rf_spec()
         ref_flux = 3.631e-20 * C * 1e8 / wave**2
-        flux_sum = np.sum((flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-        ref_flux_sum = np.sum((ref_flux * wave / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+        flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
+        ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
         return -2.5*np.log10(flux_sum/ref_flux_sum)
 
     def get_snf_magnitude(self, filter_name, z=None):
