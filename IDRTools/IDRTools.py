@@ -203,4 +203,4 @@ if __name__ == '__main__':
     d = Dataset()
     sn = d.SN2005cf
     spec = sn.get_spec_nearest_max()
-    embed()
+    # embed()
