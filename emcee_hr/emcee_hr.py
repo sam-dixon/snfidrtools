@@ -4,6 +4,7 @@ import multiprocessing
 from astropy.cosmology import FlatLambdaCDM
 import cPickle as pickle
 import sys
+import tqdm
 
 salt2_info_path = '/Users/samdixon/repos/IDRTools/salt2_info_idr.pkl'
 
@@ -71,7 +72,7 @@ ndim = 9
 randarr = np.random.rand(ndim * nwalkers).reshape((nwalkers, ndim))
 guess = [0.12, -3.0, -19.0, 0.15, 0.3, 0.3, 0.0, 0.8, 0.1]
 steps = [0.08, 2.0, 2.0, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1]
-nsamples = 25
+nsamples = 250
 nburn = 50
 keys = 'alpha beta MB sigma_int omega_m meanx meanc sigpriorx sigpriorc'.split()
 
@@ -102,5 +103,5 @@ for i in range(ndim):
     chain_dict[keys[i]] = sampler.flatchain[:, i]
     print(keys[i], sampler.flatchain[:, i][maxprob], np.median(sampler.flatchain[:, i]), np.mean(sampler.flatchain[:, i]))
 
-pickle.dump(chain_dict, open('emcee_hr_full_nsamp25_noburn.pkl', 'wb'))
+pickle.dump(chain_dict, open('emcee_hr_full.pkl', 'wb'))
 

@@ -55,6 +55,10 @@ class Supernova(object):
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
+        setattr(self, 'hr', self.get_hr()[0])
+        setattr(self, 'hr_err', self.get_hr()[1])
+        setattr(self, 'distmod', self.get_distmod()[0])
+        setattr(self, 'distmod_err', self.get_distmod()[1])
         if load_phren:
             if self.target_name in phren.iterkeys():
                 self.in_phren = True
@@ -113,6 +117,24 @@ class Supernova(object):
             ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
             mag.append(-2.5*np.log10(flux_sum/ref_flux_sum))
         return phases, mag
+
+    def get_distmod(self):
+        """
+        Return the distance modulus from the SALT2 parameters.
+        """
+        MB, alpha, beta = -19.06342478, 0.15041475, 2.71807221 # Obtained from emcee fit (see Brian's code)
+        dMB, dalpha, dbeta = 0.02830696, 0.02026153, 0.1315054
+        mu = self.salt2_RestFrameMag_0_B - MB + alpha * self.salt2_X1 - beta * self.salt2_Color
+        dmu = np.sqrt(self.salt2_RestFrameMag_0_B_err**2+dMB**2+dalpha**2*self.salt2_X1**2+alpha**2*self.salt2_X1_err**2+beta**2*self.salt2_Color_err**2+dbeta**2+self.salt2_Color**2)
+        return mu, dmu
+
+    def get_hr(self):
+        """
+        Return the Hubble residual from the SALT2 parameters.
+        """
+        mu, dmu = self.get_distmod()
+        cosmo_mu = cosmo.distmod(self.salt2_Redshift).value
+        return mu-cosmo_mu, dmu
 
 class Spectrum(Supernova):
     def __init__(self, dataset, name, obs, load_phren=True):
