@@ -122,8 +122,8 @@ class Supernova(object):
         """
         Return the distance modulus from the SALT2 parameters.
         """
-        MB, alpha, beta = -19.06342478, 0.15041475, 2.71807221 # Obtained from emcee fit (see Brian's code)
-        dMB, dalpha, dbeta = 0.02830696, 0.02026153, 0.1315054
+        MB, alpha, beta = -19.155510156376913, 0.15336666476334873, 2.7111339334687163 # Obtained from emcee fit (see Brian's code)
+        dMB, dalpha, dbeta = 0.019457765851807848, 0.020340953530227517, 0.13066032343415704
         mu = self.salt2_RestFrameMag_0_B - MB + alpha * self.salt2_X1 - beta * self.salt2_Color
         dmu = np.sqrt(self.salt2_RestFrameMag_0_B_err**2+dMB**2+dalpha**2*self.salt2_X1**2+alpha**2*self.salt2_X1_err**2+beta**2*self.salt2_Color_err**2+dbeta**2+self.salt2_Color**2)
         return mu, dmu

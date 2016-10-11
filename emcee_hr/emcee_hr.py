@@ -1,12 +1,12 @@
 import numpy as np
 import emcee
 import multiprocessing
-from astropy.cosmology import FlatLambdaCDM
+from astropy.cosmology import Planck15 as cosmo
 import cPickle as pickle
 import sys
 import tqdm
 
-salt2_info_path = '/Users/samdixon/repos/IDRTools/salt2_info_idr.pkl'
+salt2_info_path = '/Users/samdixon/repos/IDRTools/emcee_hr/salt2_info_idr.pkl'
 
 z, mb_obs, c_obs, x1_obs, ce, x1e, mbe = pickle.load(open(salt2_info_path, 'rb'))
 
@@ -44,13 +44,10 @@ def full_log_likelihood(params):
     beta = params[1]
     MB = params[2]
     sigma_int = params[3]
-    omega_m = params[4]
-    meanx = params[5]
-    meanc = params[6]
-    sigpriorx = params[7]
-    sigpriorc = params[8]
-    if (omega_m < 0.0) or (omega_m > 1.0):
-        return -np.inf
+    meanx = params[4]
+    meanc = params[5]
+    sigpriorx = params[6]
+    sigpriorc = params[7]
     if sigma_int < 0:
         return -np.inf
     if sigpriorx < 0:
@@ -58,7 +55,6 @@ def full_log_likelihood(params):
     if sigpriorc < 0:
         return -np.inf
 
-    cosmo = FlatLambdaCDM(H0=70, Om0=omega_m)
     cosmomu = cosmo.distmod(z).value
     return np.sum(negtwoLL(alpha, beta, cosmomu, MB,
                            mb_obs, x1_obs, c_obs,
@@ -68,13 +64,13 @@ def full_log_likelihood(params):
 
 
 nwalkers = 1000
-ndim = 9
+ndim = 8
 randarr = np.random.rand(ndim * nwalkers).reshape((nwalkers, ndim))
-guess = [0.12, -3.0, -19.0, 0.15, 0.3, 0.3, 0.0, 0.8, 0.1]
-steps = [0.08, 2.0, 2.0, 0.1, 0.2, 0.1, 0.1, 0.1, 0.1]
+guess = [0.12, -3.0, -19.0, 0.15, 0.3, 0.0, 0.8, 0.1]
+steps = [0.08, 2.0, 2.0, 0.1, 0.1, 0.1, 0.1, 0.1]
 nsamples = 250
 nburn = 50
-keys = 'alpha beta MB sigma_int omega_m meanx meanc sigpriorx sigpriorc'.split()
+keys = 'alpha beta MB sigma_int meanx meanc sigpriorx sigpriorc'.split()
 
 # ndim = 5
 # randarr = np.random.rand(ndim*nwalkers).reshape((nwalkers, ndim))
