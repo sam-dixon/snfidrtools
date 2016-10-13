@@ -23,7 +23,7 @@ phren = pickle.load(open(PHREN, 'rb'))
 
 class Dataset(object):
 
-    def __init__(self, data=meta, subset='training', load_phren=True):
+    def __init__(self, data=meta, subset='training', load_phren=False):
         self.data = {}
         if subset is not None:
             for k, v in data.iteritems():
