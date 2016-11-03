@@ -2,7 +2,7 @@ import os
 import numpy as np
 import cPickle as pickle
 from astropy.io import fits
-import sncosmo
+from sncosmo import Model, get_source
 from astropy.cosmology import Planck15 as cosmo
 from IPython import embed
 
@@ -81,8 +81,8 @@ class Supernova(object):
         """
         Creates the SALT2 model spectra flux based on the fit parameters.
         """
-        source = sncosmo.get_source('SALT2', version='2.4')
-        model = sncosmo.Model(source=source)
+        source = get_source('SALT2', version='2.4')
+        model = Model(source=source)
         model.set(z=0, t0=0, x0=self.salt2_X0, x1=self.salt2_X1, c=self.salt2_Color)
         wave = np.arange(3272, 9200, 2)
         measured_phases = [spec.salt2_phase for spec in self.spectra]
@@ -176,8 +176,8 @@ class Spectrum(object):
         """
         Creates the SALT2 model spectra flux based on the fit parameters.
         """
-        source = sncosmo.get_source('SALT2', version='2.4')
-        model = sncosmo.Model(source=source)
+        source = get_source('SALT2', version='2.4')
+        model = Model(source=source)
         model.set(z=0, t0=0, x0=self.sn_data['salt2.X0'], x1=self.sn_data['salt2.X1'], c=self.sn_data['salt2.Color'])
         wave = np.arange(3272, 9200, 2)
         flux = model.flux(self.salt2_phase, wave)
