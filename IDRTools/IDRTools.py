@@ -13,17 +13,16 @@ Internal Data Release.
 
 IDR_dir = '/Users/samdixon/repos/IDRTools/ALLEG2a_SNeIa'
 META = os.path.join(IDR_dir, 'META.pkl')
-PHREN = '/Users/samdixon/repos/IDRTools/phrenology_2014_04_30_BEDELLv1.pkl'
 
 C = 2.99792458e10
 PLANCK = 6.62607e-27
 
 meta = pickle.load(open(META, 'rb'))
-phren = pickle.load(open(PHREN, 'rb'))
+
 
 class Dataset(object):
 
-    def __init__(self, data=meta, subset='training', load_phren=False):
+    def __init__(self, data=meta, subset='training'):
         self.data = {}
         if subset is not None:
             for k, v in data.iteritems():
@@ -34,9 +33,9 @@ class Dataset(object):
         else:
             self.data = data
         self.sne_names = self.data.keys()
-        self.sne = [Supernova(self.data, name, load_phren) for name in self.sne_names]
+        self.sne = [Supernova(self.data, name) for name in self.sne_names]
         for k in self.data.iterkeys():
-            setattr(self, k, Supernova(self.data, k, load_phren))
+            setattr(self, k, Supernova(self.data, k))
 
     def random_sn(self, n=1):
         """
@@ -50,7 +49,7 @@ class Dataset(object):
 
 class Supernova(object):
 
-    def __init__(self, dataset, name, load_phren=True, load_spec=True):
+    def __init__(self, dataset, name):
         data = dataset[name]
         for k, v in data.iteritems():
             k = k.replace('.', '_')
@@ -59,23 +58,15 @@ class Supernova(object):
         setattr(self, 'hr_err', self.get_hr()[1])
         setattr(self, 'distmod', self.get_distmod()[0])
         setattr(self, 'distmod_err', self.get_distmod()[1])
-        if load_phren:
-            if self.target_name in phren.iterkeys():
-                self.in_phren = True
-            else:
-                self.in_phren = False
-        else:
-            self.in_phren = None
-        if load_spec:
-            self.spectra = [Spectrum(dataset, name, obs, self.in_phren) for obs in self.spectra.iterkeys()]
-            # Sort spectra by SALT2 phase
-            self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
+        self.spectra = [Spectrum(dataset, name, obs) for obs in self.spectra.iterkeys()]
+        # Sort spectra by SALT2 phase
+        self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
 
-    def get_spec_nearest_max(self):
+    def get_spec_nearest_max(self, phase=0):
         """
         Returns the spectrum object for the observation closest to B-band max.
         """
-        min_phase = min(np.abs(s.salt2_phase) for s in self.spectra)
+        min_phase = min(np.abs(s.salt2_phase-phase) for s in self.spectra)
         return [s for s in self.spectra if np.abs(s.salt2_phase) == min_phase][0]
 
     def get_lc(self, filter_name):
@@ -122,7 +113,7 @@ class Supernova(object):
         """
         Return the distance modulus from the SALT2 parameters.
         """
-        MB, alpha, beta = -19.155510156376913, 0.15336666476334873, 2.7111339334687163 # Obtained from emcee fit (see Brian's code)
+        MB, alpha, beta = -19.155510156376913, 0.15336666476334873, 2.7111339334687163  # Obtained from emcee fit (see Brian's code)
         dMB, dalpha, dbeta = 0.019457765851807848, 0.020340953530227517, 0.13066032343415704
         mu = self.salt2_RestFrameMag_0_B - MB + alpha * self.salt2_X1 - beta * self.salt2_Color
         dmu = np.sqrt(self.salt2_RestFrameMag_0_B_err**2+dMB**2+dalpha**2*self.salt2_X1**2+alpha**2*self.salt2_X1_err**2+beta**2*self.salt2_Color_err**2+dbeta**2+self.salt2_Color**2)
@@ -136,20 +127,14 @@ class Supernova(object):
         cosmo_mu = cosmo.distmod(self.salt2_Redshift).value
         return mu-cosmo_mu, dmu
 
-class Spectrum(Supernova):
-    def __init__(self, dataset, name, obs, load_phren=True):
+
+class Spectrum(object):
+    def __init__(self, dataset, name, obs):
+        self.sn_data = dataset[name]
         data = dataset[name]['spectra'][obs]
         for k, v in data.iteritems():
             k = k.replace('.', '_')
             setattr(self, k, v)
-        super(Spectrum, self).__init__(dataset, name, load_phren, load_spec=False)
-
-        if load_phren:
-            if self.obs_exp in phren[self.target_name]['spectra'].iterkeys():
-                for k, v in phren[self.target_name]['spectra'][self.obs_exp].iteritems():
-                    if k is not None:
-                        k = k.replace('.', '_')
-                        setattr(self, k, v)
 
     def get_merged_spec(self):
         """
@@ -182,9 +167,9 @@ class Spectrum(Supernova):
         npts = len(flux)+1
         wave = np.linspace(start, end, npts)[:-1]
         #Flux is scaled by a relative distance factor to z=0.05 and multiplied by 1e15
-        dl = (1 + self.host_zhelio) * cosmo.comoving_transverse_distance(self.host_zcmb)
-        dlref = cosmo.luminosity_distance(0.05)
-        flux = flux / ((1+self.host_zhelio)/(1+0.05) * (dl/dlref)**2 * 1e15)
+        dl = (1 + self.sn_data['host.zhelio']) * cosmo.comoving_transverse_distance(self.sn_data['host.zcmb']).value
+        dlref = cosmo.luminosity_distance(0.05).value
+        flux = flux / ((1+self.sn_data['host.zhelio'])/(1+0.05) * (dl/dlref)**2 * 1e15)
         return wave, flux, err
 
     def get_salt2_model_fluxes(self):
@@ -193,7 +178,7 @@ class Spectrum(Supernova):
         """
         source = sncosmo.get_source('SALT2', version='2.4')
         model = sncosmo.Model(source=source)
-        model.set(z=0, t0=0, x0=self.salt2_X0, x1=self.salt2_X1, c=self.salt2_Color)
+        model.set(z=0, t0=0, x0=self.sn_data['salt2.X0'], x1=self.sn_data['salt2.X1'], c=self.sn_data['salt2.Color'])
         wave = np.arange(3272, 9200, 2)
         flux = model.flux(self.salt2_phase, wave)
         return wave, flux
@@ -225,4 +210,4 @@ if __name__ == '__main__':
     d = Dataset()
     sn = d.SN2005cf
     spec = sn.get_spec_nearest_max()
-    # embed()
+    embed()
