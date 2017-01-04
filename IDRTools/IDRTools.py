@@ -170,6 +170,7 @@ class Spectrum(object):
         dl = (1 + self.sn_data['host.zhelio']) * cosmo.comoving_transverse_distance(self.sn_data['host.zcmb']).value
         dlref = cosmo.luminosity_distance(0.05).value
         flux = flux / ((1+self.sn_data['host.zhelio'])/(1+0.05) * (dl/dlref)**2 * 1e15)
+        err = err / ((1+self.sn_data['host.zhelio'])/(1+0.05) * (dl/dlref)**2 * 1e15)**2
         return wave, flux, err
 
     def get_salt2_model_fluxes(self):
@@ -210,4 +211,4 @@ if __name__ == '__main__':
     d = Dataset()
     sn = d.SN2005cf
     spec = sn.get_spec_nearest_max()
-    embed()
+    w, f, v = spec.get_rf_spec()
