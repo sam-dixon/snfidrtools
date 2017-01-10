@@ -28,7 +28,7 @@ class Dataset(object):
             for k, v in data.iteritems():
                 k = k.replace('.', '_')
                 k = k.replace('-', '_')
-                if v['idr.subset'] == subset:
+                if v['idr.subset'] in subset:
                     self.data[k] = v
         else:
             self.data = data
@@ -67,7 +67,7 @@ class Supernova(object):
         Returns the spectrum object for the observation closest to B-band max.
         """
         min_phase = min(np.abs(s.salt2_phase-phase) for s in self.spectra)
-        return [s for s in self.spectra if np.abs(s.salt2_phase) == min_phase][0]
+        return [s for s in self.spectra if np.abs(s.salt2_phase-phase) == min_phase][0]
 
     def get_lc(self, filter_name):
         """
