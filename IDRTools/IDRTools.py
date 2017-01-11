@@ -62,22 +62,22 @@ class Supernova(object):
         # Sort spectra by SALT2 phase
         self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
 
-    def get_spec_nearest_max(self, phase=0):
+    def spec_nearest_max(self, phase=0):
         """
         Returns the spectrum object for the observation closest to B-band max.
         """
         min_phase = min(np.abs(s.salt2_phase-phase) for s in self.spectra)
         return [s for s in self.spectra if np.abs(s.salt2_phase-phase) == min_phase][0]
 
-    def get_lc(self, filter_name):
+    def lc(self, filter_name):
         """
         Finds the light curve in some SNf filter using synthetic photometry.
         """
         phase = [spec.salt2_phase for spec in self.spectra]
-        mag = [spec.get_snf_magnitude(filter_name) for spec in self.spectra]
+        mag = [spec.snf_magnitude(filter_name) for spec in self.spectra]
         return phase, mag
 
-    def get_salt2_model_fluxes(self):
+    def salt2_model_fluxes(self):
         """
         Creates the SALT2 model spectra flux based on the fit parameters.
         """
@@ -90,11 +90,11 @@ class Supernova(object):
         fluxes = model.flux(phases, wave)
         return phases, wave, fluxes
 
-    def get_salt2_model_lc(self, filter_name):
+    def salt2_model_lc(self, filter_name):
         """
         Creates the SALT2 model light curve based on the fit parameters.
         """
-        phases, wave, fluxes = self.get_salt2_model_fluxes()
+        phases, wave, fluxes = self.salt2_model_fluxes()
         filter_edges = {'u' : (3300., 4102.),
                         'b' : (4102., 5100.),
                         'v' : (5200., 6289.),
@@ -136,7 +136,7 @@ class Spectrum(object):
             k = k.replace('.', '_')
             setattr(self, k, v)
 
-    def get_merged_spec(self):
+    def merged_spec(self):
         """
         Returns the merged spectrum from the IDR FITS files.
         """
@@ -152,7 +152,7 @@ class Spectrum(object):
         wave = np.linspace(start, end, npts)[:-1]
         return wave, flux, err
 
-    def get_rf_spec(self):
+    def rf_spec(self):
         """
         Returns the restframe spectrum from the IDR FITS files.
         """
@@ -173,7 +173,7 @@ class Spectrum(object):
         err = err / ((1+self.sn_data['host.zhelio'])/(1+0.05) * (dl/dlref)**2 * 1e15)**2
         return wave, flux, err
 
-    def get_salt2_model_fluxes(self):
+    def salt2_model_fluxes(self):
         """
         Creates the SALT2 model spectra flux based on the fit parameters.
         """
@@ -184,17 +184,17 @@ class Spectrum(object):
         flux = model.flux(self.salt2_phase, wave)
         return wave, flux
 
-    def get_magnitude(self, min_wave, max_wave):
+    def magnitude(self, min_wave, max_wave):
         """
         Calculates the AB magnitude in a given top-hat filter.
         """
-        wave, flux, flux_err = self.get_rf_spec()
+        wave, flux, flux_err = self.rf_spec()
         ref_flux = 3.631e-20 * C * 1e8 / wave**2
         flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
         ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
         return -2.5*np.log10(flux_sum/ref_flux_sum)
 
-    def get_snf_magnitude(self, filter_name, z=None):
+    def snf_magnitude(self, filter_name, z=None):
         """
         Calculates the AB magnitude in a given SNf filter.
         """
@@ -204,11 +204,11 @@ class Spectrum(object):
                         'r' : (6289., 7607.),
                         'i' : (7607., 9200.)}
         min_wave, max_wave = filter_edges[filter_name]
-        return self.get_magnitude(min_wave, max_wave)
+        return self.magnitude(min_wave, max_wave)
 
 
 if __name__ == '__main__':
     d = Dataset()
     sn = d.SN2005cf
-    spec = sn.get_spec_nearest_max()
-    w, f, v = spec.get_rf_spec()
+    spec = sn.spec_nearest_max()
+    w, f, v = spec.rf_spec()
