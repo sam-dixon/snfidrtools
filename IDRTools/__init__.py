@@ -1,2 +1,2 @@
 from IDRTools import *
-from math import *
+from IDRmath import *

@@ -11,4 +11,5 @@ setup(name='IDRTools',
       install_requires=['numpy', 'matplotlib', 'IPython', 'sncosmo'],
       zip_safe=False,
       test_suite='nose.collector',
-      tests_require=['nose'])
+      tests_require=['nose'],
+      include_package_data=True)
