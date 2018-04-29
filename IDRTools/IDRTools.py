@@ -1,43 +1,36 @@
 import os
+import sncosmo
 import numpy as np
 import pickle as pickle
 from astropy.io import fits
-from sncosmo import Model, get_source, CCM89Dust
-from astropy.cosmology import Planck15 as cosmo
+from extinction import apply, ccm89
+from collections import defaultdict
+from astropy.cosmology import FlatLambdaCDM
 
-"""
-A bunch of handy utilities for working with the Nearby Supernova Factory
-Internal Data Release.
-"""
+cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
 
-IDR_dir = '/Users/samdixon/repos/IDRTools/ALLEG2a_SNeIa'
-META = os.path.join(IDR_dir, 'META.pkl')
+try:
+    IDR_dir = '/Users/samdixon/data/ALLEG2a_SNeIa'
+    os.listdir(IDR_dir)
+except:
+    IDR_dir = '/Users/maryliu/Desktop'
 
-C = 2.99792458e10
-PLANCK = 6.62607e-27
+METAPATH = os.path.join(IDR_dir, 'META.pkl')
+META = pickle.load(open(METAPATH, 'rb'))
 
-meta = pickle.load(open(META, 'rb'))
+DLREF = cosmo.luminosity_distance(0.05)
 
 
+# Rebinning ###########################################################
 def lambda_bin(wmin, wmax, velocity):
-    """Returns velocity bins"""
     n = int(round(np.log10(float(wmax)/wmin) / np.log10(1 + velocity/3.0e5) + 1))
     binedges = np.logspace(np.log10(wmin), np.log10(wmax), n)
     bincenters = (binedges[0:-1] + binedges[1:])/2  # not log centers
-    wave = np.around(bincenters)
+    wave = bincenters
     return [wave, binedges]
 
 
 def recover_bin_edges(bin_centers):
-    """Convert a list of bin centers to bin edges.
-    We do a second order correction to try to get this as accurately as
-    possible.
-    For linear binning there is only machine precision error with either first
-    or second order binning.
-    For higher order binnings (eg: log), the fractional error is of order (dA /
-    A)**2 for linear recovery and (dA / A)**4 for the second order recovery
-    that we do here.
-    """
     # First order
     o1 = (bin_centers[:-1] + bin_centers[1:]) / 2.
 
@@ -58,11 +51,14 @@ def recover_bin_edges(bin_centers):
     return bin_starts, bin_ends
 
 
-def rebin(old_bin_centers, flux, var):
+def rebin(old_bin_centers, flux, var, new_bin_centers=None):
     old_bin_starts, old_bin_ends = recover_bin_edges(old_bin_centers)
-    new_bin_centers, new_bin_edges = lambda_bin(3300, 8600, 1000)
-    new_bin_starts = new_bin_edges[:-1]
-    new_bin_ends = new_bin_edges[1:]
+    if new_bin_centers is None:
+        new_bin_centers, new_bin_edges = lambda_bin(3300, 8600, 1000)
+        new_bin_starts = new_bin_edges[:-1]
+        new_bin_ends = new_bin_edges[1:]
+    else:
+        new_bin_starts, new_bin_ends = recover_bin_edges(new_bin_centers)
 
     num_new_bins = len(new_bin_starts)
     num_old_bins = len(old_bin_starts)
@@ -141,20 +137,27 @@ def rebin(old_bin_centers, flux, var):
     return new_bin_centers, new_flux, new_fluxvar
 
 
-def add_noise(wave, flux, s2n):
-    """
-    Add Gaussian noise with the given signal-to-noise characteristic
-    """
-    sigma = flux/s2n
-    noise = np.random.randn(len(flux)) * sigma
-    noised_flux = flux + noise
-    noised_var = sigma**2
-    return wave, noised_flux, noised_var
+# SNfactory tophat band definitions ###################################
+
+filter_edges = {'u': (3570., 4102.),
+                'b': (4102., 5100.),
+                'v': (5200., 6289.),
+                'r': (6289., 7607.),
+                'i': (7607., 8585.)}
+SNF_BANDS = {}
+for fname, edges in filter_edges.items():
+    wave = [edges[0]-1., edges[0], edges[1], edges[1]+1.]
+    trans = [0., 1., 1., 0.]
+    SNF_BANDS[fname] = sncosmo.Bandpass(wave, trans, name='snf'+fname)
+
+MAGSYS = sncosmo.get_magsystem('vega')
 
 
 class Dataset(object):
 
-    def __init__(self, data=meta, subset='training'):
+    def __init__(self, data_dir=IDR_dir, subset=None):
+        self.data_dir = data_dir
+        data = pickle.load(open(os.path.join(data_dir, 'META.pkl'), 'rb'))
         self.data = {}
         if subset is not None:
             self.subset = ''.join(subset)
@@ -170,12 +173,6 @@ class Dataset(object):
         for k in self.data.keys():
             setattr(self, k, Supernova(self.data, k))
 
-    def random_sn(self):
-        """
-        Returns a random supernova
-        """
-        return np.random.choice(self.sne, 1)[0]
-
 
 class Supernova(object):
 
@@ -184,81 +181,92 @@ class Supernova(object):
         for k, v in data.items():
             k = k.replace('.', '_')
             setattr(self, k, v)
-        setattr(self, 'hr', self.get_hr()[0])
-        setattr(self, 'hr_err', self.get_hr()[1])
-        setattr(self, 'distmod', self.get_distmod()[0])
-        setattr(self, 'distmod_err', self.get_distmod()[1])
         self.spectra = [Spectrum(dataset, name, obs) for obs in self.spectra.keys()]
-        # Sort spectra by SALT2 phase
-        self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
+        # Sort spectra by SALT2 phase if possible
+        try:
+            self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
+        except AttributeError:
+            pass
+        # Remove spectra with processing flags
+        self.spectra_noflags = []
+        for spec in self.spectra:
+            try:
+                if (len(spec.procR_Flags) == 0) and (len(spec.procB_Flags) == 0):
+                    self.spectra_noflags.append(spec)
+            except AttributeError:
+                continue
 
-    def spec_nearest_max(self, phase=0):
+    def spec_nearest(self, phase=0):
         """
-        Returns the spectrum object for the observation closest to B-band max.
+        Returns the spectrum object closest to the given phase.
         """
-        min_phase = min(np.abs(s.salt2_phase-phase) for s in self.spectra)
-        return [s for s in self.spectra if np.abs(s.salt2_phase-phase) == min_phase][0]
+        min_phase = min(np.abs(s.salt2_phase-phase) for s in self.spectra_noflags)
+        return [s for s in self.spectra_noflags if np.abs(s.salt2_phase-phase) == min_phase][0]
 
-    def lc(self, filter_name):
+    def idr_lc(self):
         """
-        Finds the light curve in some SNf filter using synthetic photometry.
+        Lightcurve found in the IDR
         """
-        phase = [spec.salt2_phase for spec in self.spectra]
-        mag = [spec.snf_magnitude(filter_name) for spec in self.spectra]
-        return phase, mag
+        lc = defaultdict(list)
+        for spec in self.spectra_noflags:
+            lc['phase'].append(spec.salt2_phase)
+            for name in SNF_BANDS.keys():
+                lc[name].append(getattr(spec, 'mag_{}SNf'.format(name[-1].upper())))
+        return lc
 
-    def salt2_model_fluxes(self):
+    def synth_lc(self):
         """
-        Creates the SALT2 model spectra flux based on the fit parameters.
+        Lightcurve synthesized from the spectrum
         """
-        source = get_source('SALT2', version='2.4')
-        dust = CCM89Dust()
-        model = Model(source=source, effects=[dust],
-                      effect_names=['mw'], effect_frames=['obs'])
-        model.set(z=0, t0=0, x0=self.salt2_X0, x1=self.salt2_X1,
-                  c=self.salt2_Color, mwebv=self.salt2_target_mwebv)
-        wave = np.arange(3272, 9200, 2)
-        measured_phases = [spec.salt2_phase for spec in self.spectra]
-        phases = np.linspace(min(measured_phases), max(measured_phases), 100)
-        fluxes = model.flux(phases, wave)
-        return phases, wave, fluxes
+        lc = defaultdict(list)
+        for spec in self.spectra_noflags:
+            lc['phase'].append(spec.salt2_phase)
+            wave, flux, var = spec.merged_spec()
+            snc_spec = sncosmo.Spectrum(wave, flux)
+            for name, band in SNF_BANDS.items():
+                try:
+                    bandflux = snc_spec.bandflux(band)
+                    lc[name].append(MAGSYS.band_flux_to_mag(bandflux, band))
+                except ValueError:
+                    lc[name].append(np.nan)
+        return lc
 
-    def salt2_model_lc(self, filter_name):
+    def synth_lc_array(self):
         """
-        Creates the SALT2 model light curve based on the fit parameters.
+        Lightcurve as a 5 x n_epochs numpy array (for fitting)
         """
-        phases, wave, fluxes = self.salt2_model_fluxes()
-        filter_edges = {'u': (3300., 4102.),
-                        'b': (4102., 5100.),
-                        'v': (5200., 6289.),
-                        'r': (6289., 7607.),
-                        'i': (7607., 9200.)}
-        min_wave, max_wave = filter_edges[filter_name]
-        mag = []
-        for flux in fluxes:
-            ref_flux = 3.631e-20 * C * 1e8 / wave**2
-            flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-            ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-            mag.append(-2.5*np.log10(flux_sum/ref_flux_sum))
-        return phases, mag
+        lcs, phases = [], []
+        for spec in self.spectra_noflags:
+            if spec.salt2_phase < -10 or spec.salt2_phase > 46:
+                continue
+            phases.append(spec.salt2_phase)
+            wave, flux, var = spec.merged_spec()
+            snc_spec = sncosmo.Spectrum(wave, flux)
+            for name, band in SNF_BANDS.items():
+                try:
+                    bandflux = snc_spec.bandflux(band)
+                    lcs.append(MAGSYS.band_flux_to_mag(bandflux, band))
+                except ValueError:
+                    lcs.append(np.nan)
+        lcs = np.array(lcs)
+        phases = np.array(phases)
+        return phases, lcs.reshape(len(phases), 5)
 
-    def get_distmod(self):
+    def spec_array(self):
         """
-        Return the distance modulus from the SALT2 parameters.
+        Spectra as 288 x n_epochs numpy array (for fitting)
         """
-        MB, alpha, beta = -19.155510156376913, 0.15336666476334873, 2.7111339334687163  # Obtained from emcee fit (see Brian's code)
-        dMB, dalpha, dbeta = 0.019457765851807848, 0.020340953530227517, 0.13066032343415704
-        mu = self.salt2_RestFrameMag_0_B - MB + alpha * self.salt2_X1 - beta * self.salt2_Color
-        dmu = np.sqrt(self.salt2_RestFrameMag_0_B_err**2+dMB**2+dalpha**2*self.salt2_X1**2+alpha**2*self.salt2_X1_err**2+beta**2*self.salt2_Color_err**2+dbeta**2+self.salt2_Color**2)
-        return mu, dmu
-
-    def get_hr(self):
-        """
-        Return the Hubble residual from the SALT2 parameters.
-        """
-        mu, dmu = self.get_distmod()
-        cosmo_mu = cosmo.distmod(self.salt2_Redshift).value
-        return mu-cosmo_mu, dmu
+        specs, phases = [], []
+        for spec in self.spectra_noflags:
+            if spec.salt2_phase < -10 or spec.salt2_phase > 46:
+                continue
+            phases.append(spec.salt2_phase)
+            wave, flux, var = spec.rf_spec()
+            rbwave, rbflux, _ = rebin(wave, flux, var)
+            specs.append(rbflux)
+        specs = np.array(specs)
+        phases = np.array(phases)
+        return specs, phases
 
 
 class Spectrum(object):
@@ -272,97 +280,53 @@ class Spectrum(object):
     def merged_spec(self):
         """
         Returns the merged spectrum from the IDR FITS files.
+        The fluxes are not normalized to z=0.05, Milky Way extinction
+        has not been removed, and the wavelengths are in the observer
+        frame. Flux units are ergs/s/cm^2/AA.
         """
-        path = os.path.join(IDR_dir, self.idr_spec_merged)
-        f = fits.open(path)
-        head = f[0].header
-        flux = f[0].data
-        var = f[1].data
-        f.close()
+        path = os.path.join(self.dataset.IDR_dir, self.idr_spec_merged)
+        with fits.open(path) as f:
+            head = f[0].header
+            flux = f[0].data
+            var = f[1].data
         start = head['CRVAL1']
         end = head['CRVAL1']+head['CDELT1']*len(flux)
-        npts = len(flux)+1
-        wave = np.linspace(start, end, npts)[:-1]
+        npts = len(flux)
+        wave = np.linspace(start, end, npts)
         return wave, flux, var
 
-    def rf_spec(self, bin_edges=None, s2n=None, renorm=True):
+    def rf_spec_from_merged(self):
         """
-        Returns the restframe spectrum from the IDR FITS files.
+        Returns the rest frame spectrum as calculated by normalizing
+        and dereddening the merged spectrum.
         """
-        path = os.path.join(IDR_dir, self.idr_spec_restframe)
-        f = fits.open(path)
-        head = f[0].header
-        flux = f[0].data
-        var = f[1].data
-        f.close()
+        wave, flux, var = self.merged_spec()
+        zhelio = self.sn_data['host.zhelio']
+        zcmb = self.sn_data['host.zcmb']
+        mwebv = self.sn_data['target.mwebv']
+        # Remove dust extinction from Milky Way in observer frame
+        flux = apply(ccm89(wave, -mwebv*3.1, 3.1), flux)
+        # Convert observer frame wavelengths to rest frame
+        wave = wave/(1+zhelio)
+        # Convert flux to luminosity at z=0.05
+        dl = (1+zhelio)*cosmo.comoving_transverse_distance(zcmb)
+        cosmo_factor = (1+zhelio)/1.05*(dl/DLREF)**2
+        flux = flux*cosmo_factor*1e15
+        var = flux*(cosmo_factor*1e15)**2
+        return wave, flux, var
+
+    def rf_spec(self):
+        """
+        Returns the rest frame spectrum directly from the IDR
+        Units are normalized ergs/s/cm^2/AA
+        """
+        path = os.path.join(self.dataset.IDR_dir, self.idr_spec_restframe)
+        with fits.open(path) as f:
+            head = f[0].header
+            flux = f[0].data
+            var = f[1].data
         start = head['CRVAL1']
         end = head['CRVAL1']+head['CDELT1']*len(flux)
-        npts = len(flux)+1
-        wave = np.linspace(start, end, npts)[:-1]
-        if renorm:
-            #Flux is scaled by a relative distance factor to z=0.05 and multiplied by 1e15
-            dl = (1 + self.sn_data['host.zhelio']) * cosmo.comoving_transverse_distance(self.sn_data['host.zcmb']).value
-            dlref = cosmo.luminosity_distance(0.05).value
-            flux = flux / ((1+self.sn_data['host.zhelio'])/(1+0.05) * (dl/dlref)**2 * 1e15)
-            var = var / ((1+self.sn_data['host.zhelio'])/(1+0.05) * (dl/dlref)**2 * 1e15)**2
-        if bin_edges is not None:
-            wave, flux, var = self.rebin(wave, flux, var, bin_edges)
-        if s2n is not None:
-            wave, flux, var = self.add_noise(wave, flux, var, s2n)
+        npts = len(flux)
+        wave = np.linspace(start, end, npts)
         return wave, flux, var
-
-    def salt2_model_fluxes(self):
-        """
-        Creates the SALT2 model spectra flux based on the fit parameters.
-        """
-        source = get_source('SALT2', version='2.4')
-        model = Model(source=source)
-        model.set(z=0, t0=0, x0=self.sn_data['salt2.X0'], x1=self.sn_data['salt2.X1'], c=self.sn_data['salt2.Color'])
-        wave = np.arange(3272, 9200, 2)
-        flux = model.flux(self.salt2_phase, wave)
-        return wave, flux
-
-    def magnitude(self, min_wave, max_wave):
-        """
-        Calculates the AB magnitude in a given top-hat filter.
-        """
-        wave, flux, var = self.rf_spec()
-        ref_flux = 3.631e-20 * C * 1e8 / wave**2
-        flux_sum = np.sum((flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-        ref_flux_sum = np.sum((ref_flux * wave * 2 / PLANCK / C)[(wave > min_wave) & (wave < max_wave)])
-        return -2.5*np.log10(flux_sum/ref_flux_sum)
-
-    def snf_magnitude(self, filter_name, z=None):
-        """
-        Calculates the AB magnitude in a given SNf filter.
-        """
-        filter_edges = {'u': (3300., 4102.),
-                        'b': (4102., 5100.),
-                        'v': (5200., 6289.),
-                        'r': (6289., 7607.),
-                        'i': (7607., 9200.)}
-        min_wave, max_wave = filter_edges[filter_name]
-        return self.magnitude(min_wave, max_wave)
-
-    def wfirst_s2n(self, z=1, noise=True):
-        wfw, wfsn = np.loadtxt('/Users/samdixon/repos/IDRTools/data/wfirst_z{:0.2f}.txt'.format(z),
-                               unpack=True, usecols=(0, 3))
-        wave, flux, var = self.rf_spec()
-        rebinned, flux = self.rebin(wave, flux, wfw)
-        if noise:
-            rebinned, flux, var = self.add_noise(rebinned, flux, wfsn)
-        outwave = rebinned[(rebinned > min(wave)) & (rebinned < max(wave))]
-        flux = flux[(rebinned > min(wave)) & (rebinned < max(wave))]
-        var = var[(rebinned > min(wave)) & (rebinned < max(wave))]
-        return outwave, flux, var
-
-
-if __name__ == '__main__':
-    d = Dataset()
-    sn = d.PTF09dnl
-    spec = sn.spec_nearest_max()
-    wave, flux, var = spec.rf_spec()
-    wfwave, wfflux, wfvar = spec.wfirst_s2n()
-    import matplotlib.pyplot as plt
-    plt.errorbar(wfwave, wfflux, yerr=np.sqrt(wfvar), alpha=0.3)
-    plt.show()
