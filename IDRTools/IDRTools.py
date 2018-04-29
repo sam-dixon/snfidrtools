@@ -1,4 +1,5 @@
 import os
+import gc
 import sncosmo
 import numpy as np
 import pickle as pickle
@@ -169,19 +170,20 @@ class Dataset(object):
         else:
             self.data = data
         self.sne_names = list(self.data.keys())
-        self.sne = [Supernova(self.data, name) for name in self.sne_names]
+        self.sne = [Supernova(self.data, name, self.data_dir) for name in self.sne_names]
         for k in self.data.keys():
-            setattr(self, k, Supernova(self.data, k))
+            setattr(self, k, Supernova(self.data, k, self.data_dir))
 
 
 class Supernova(object):
 
-    def __init__(self, dataset, name):
+    def __init__(self, dataset, name, data_dir=IDR_dir):
+        self.data_dir = data_dir
         data = dataset[name]
         for k, v in data.items():
             k = k.replace('.', '_')
             setattr(self, k, v)
-        self.spectra = [Spectrum(dataset, name, obs) for obs in self.spectra.keys()]
+        self.spectra = [Spectrum(dataset, name, obs, data_dir=data_dir) for obs in self.spectra.keys()]
         # Sort spectra by SALT2 phase if possible
         try:
             self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
@@ -270,7 +272,8 @@ class Supernova(object):
 
 
 class Spectrum(object):
-    def __init__(self, dataset, name, obs):
+    def __init__(self, dataset, name, obs, data_dir=IDR_dir):
+        self.data_dir = data_dir
         self.sn_data = dataset[name]
         data = dataset[name]['spectra'][obs]
         for k, v in data.items():
@@ -284,7 +287,7 @@ class Spectrum(object):
         has not been removed, and the wavelengths are in the observer
         frame. Flux units are ergs/s/cm^2/AA.
         """
-        path = os.path.join(self.dataset.IDR_dir, self.idr_spec_merged)
+        path = os.path.join(self.data_dir, self.idr_spec_merged)
         with fits.open(path) as f:
             head = f[0].header
             flux = f[0].data
@@ -320,11 +323,11 @@ class Spectrum(object):
         Returns the rest frame spectrum directly from the IDR
         Units are normalized ergs/s/cm^2/AA
         """
-        path = os.path.join(self.dataset.IDR_dir, self.idr_spec_restframe)
+        path = os.path.join(self.data_dir, self.idr_spec_restframe)
         with fits.open(path) as f:
-            head = f[0].header
-            flux = f[0].data
-            var = f[1].data
+            head = f[0].header.copy()
+            flux = f[0].data.copy()
+            var = f[1].data.copy()
         start = head['CRVAL1']
         end = head['CRVAL1']+head['CDELT1']*len(flux)
         npts = len(flux)
