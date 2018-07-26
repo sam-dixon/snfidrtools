@@ -7,19 +7,19 @@ from astropy.io import fits
 from extinction import apply, ccm89
 from collections import defaultdict
 from astropy.cosmology import FlatLambdaCDM
-
-cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
+from warnings import warn
 
 try:
     IDR_dir = '/Users/samdixon/data/ALLEG2a_SNeIa'
     os.listdir(IDR_dir)
-except:
-    IDR_dir = '/Users/maryliu/Desktop'
+except FileNotFoundError:
+    IDR_dir = '/home/samdixon/snfidrtools/ALLEG2a_SNeIa'
 
 METAPATH = os.path.join(IDR_dir, 'META.pkl')
 META = pickle.load(open(METAPATH, 'rb'))
 
-DLREF = cosmo.luminosity_distance(0.05)
+COSMO = FlatLambdaCDM(H0=70, Om0=0.3)
+DLREF = COSMO.luminosity_distance(0.05)
 
 
 # Rebinning ###########################################################
@@ -140,11 +140,16 @@ def rebin(old_bin_centers, flux, var, new_bin_centers=None):
 
 # SNfactory tophat band definitions ###################################
 
-filter_edges = {'u': (3570., 4102.),
+# filter_edges = {'u': (3570., 4102.),
+#                 'b': (4102., 5100.),
+#                 'v': (5200., 6289.),
+#                 'r': (6289., 7607.),
+#                 'i': (7607., 8585.)}
+filter_edges = {'u': (3300., 4102.),
                 'b': (4102., 5100.),
                 'v': (5200., 6289.),
                 'r': (6289., 7607.),
-                'i': (7607., 8585.)}
+                'i': (7607., 9200.)}
 SNF_BANDS = {}
 for fname, edges in filter_edges.items():
     wave = [edges[0]-1., edges[0], edges[1], edges[1]+1.]
@@ -152,27 +157,44 @@ for fname, edges in filter_edges.items():
     SNF_BANDS[fname] = sncosmo.Bandpass(wave, trans, name='snf'+fname)
 
 MAGSYS = sncosmo.get_magsystem('vega')
+SUBSET_NAMES = ['training', 'validation', 'auxiliary', 'bad']
 
 
 class Dataset(object):
 
-    def __init__(self, data_dir=IDR_dir, subset=None):
+    def __init__(self, subset=None, data_dir=IDR_dir):
         self.data_dir = data_dir
-        data = pickle.load(open(os.path.join(data_dir, 'META.pkl'), 'rb'))
+        with open(os.path.join(data_dir, 'META.pkl'), 'rb') as meta:
+            data = pickle.load(meta)
         self.data = {}
         if subset is not None:
-            self.subset = ''.join(subset)
+            # Convert to list
+            if type(subset) is str:
+                subset = [subset]
+            # Check for bad subset names
+            cleaned_subset_names = []
+            for subset_name in subset:
+                if subset_name not in SUBSET_NAMES:
+                    warn('{} is an invalid subset name'.format(subset_name))
+                else:
+                    cleaned_subset_names.append(subset_name)
+            # Only add data from the selected subsets
+            self.subset = cleaned_subset_names
             for k, v in data.items():
                 k = k.replace('.', '_')
                 k = k.replace('-', '_')
-                if v['idr.subset'] in subset:
+                if v['idr.subset'] in cleaned_subset_names:
                     self.data[k] = v
         else:
+            self.subset = None
             self.data = data
         self.sne_names = list(self.data.keys())
         self.sne = [Supernova(self.data, name, self.data_dir) for name in self.sne_names]
         for k in self.data.keys():
             setattr(self, k, Supernova(self.data, k, self.data_dir))
+
+    def __len__(self):
+        return len(self.sne)
 
 
 class Supernova(object):
@@ -188,6 +210,7 @@ class Supernova(object):
         try:
             self.spectra = sorted(self.spectra, key=lambda x: x.salt2_phase)
         except AttributeError:
+            # If no SALT2 phase, do nothing
             pass
         # Remove spectra with processing flags
         self.spectra_noflags = []
@@ -196,13 +219,19 @@ class Supernova(object):
                 if (len(spec.procR_Flags) == 0) and (len(spec.procB_Flags) == 0):
                     self.spectra_noflags.append(spec)
             except AttributeError:
+                # Do nothing if flags aren't set
                 continue
 
     def spec_nearest(self, phase=0):
         """
         Returns the spectrum object closest to the given phase.
+        Raises error if no phase information exists
         """
-        min_phase = min(np.abs(s.salt2_phase-phase) for s in self.spectra_noflags)
+        try:
+            min_phase = min(np.abs(s.salt2_phase-phase) for s in self.spectra_noflags)
+        except AttributeError:
+            print('No phase information available')
+            return None
         return [s for s in self.spectra_noflags if np.abs(s.salt2_phase-phase) == min_phase][0]
 
     def idr_lc(self):
@@ -214,6 +243,7 @@ class Supernova(object):
             lc['phase'].append(spec.salt2_phase)
             for name in SNF_BANDS.keys():
                 lc[name].append(getattr(spec, 'mag_{}SNf'.format(name[-1].upper())))
+                lc[name+'_err'].append(getattr(spec, 'mag_{}SNf_err'.format(name[-1].upper())))
         return lc
 
     def synth_lc(self):
@@ -254,20 +284,29 @@ class Supernova(object):
         phases = np.array(phases)
         return phases, lcs.reshape(len(phases), 5)
 
-    def spec_array(self):
+    def spec_array(self, rf=True, return_var=False):
         """
         Spectra as 288 x n_epochs numpy array (for fitting)
         """
-        specs, phases = [], []
+        specs, phases, all_var = [], [], []
         for spec in self.spectra_noflags:
             if spec.salt2_phase < -10 or spec.salt2_phase > 46:
                 continue
             phases.append(spec.salt2_phase)
-            wave, flux, var = spec.rf_spec()
-            rbwave, rbflux, _ = rebin(wave, flux, var)
+            if rf:
+                wave, flux, var = spec.rf_spec()
+                rbwave, rbflux, rbvar = rebin(wave, flux, var)
+            else:
+                wave, flux, var = spec.merged_spec()
+                rbwave, rbflux, rbvar = rebin(wave/(1+self.host_zhelio),
+                                              flux, var)
             specs.append(rbflux)
+            all_var.append(rbvar)
         specs = np.array(specs)
+        all_var = np.array(all_var)
         phases = np.array(phases)
+        if return_var:
+            return specs, phases, all_var
         return specs, phases
 
 
@@ -312,7 +351,7 @@ class Spectrum(object):
         # Convert observer frame wavelengths to rest frame
         wave = wave/(1+zhelio)
         # Convert flux to luminosity at z=0.05
-        dl = (1+zhelio)*cosmo.comoving_transverse_distance(zcmb)
+        dl = (1+zhelio)*COSMO.comoving_transverse_distance(zcmb)
         cosmo_factor = (1+zhelio)/1.05*(dl/DLREF)**2
         flux = flux*cosmo_factor*1e15
         var = flux*(cosmo_factor*1e15)**2
