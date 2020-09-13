@@ -1,5 +1,4 @@
 import os
-import gc
 import sncosmo
 import numpy as np
 import pickle as pickle
@@ -10,13 +9,10 @@ from astropy.cosmology import FlatLambdaCDM
 from warnings import warn
 
 try:
-    IDR_dir = '/Users/samdixon/data/ALLEG2a_SNeIa'
+    IDR_dir = '/Users/samdixon/data/CASCAD'
     os.listdir(IDR_dir)
 except FileNotFoundError:
     IDR_dir = '/home/samdixon/snfidrtools/ALLEG2a_SNeIa'
-
-METAPATH = os.path.join(IDR_dir, 'META.pkl')
-META = pickle.load(open(METAPATH, 'rb'))
 
 COSMO = FlatLambdaCDM(H0=70, Om0=0.3)
 DLREF = COSMO.luminosity_distance(0.05)
@@ -221,6 +217,9 @@ class Supernova(object):
             except AttributeError:
                 # Do nothing if flags aren't set
                 continue
+
+    def __repr__(self):
+        return self.target_name
 
     def spec_nearest(self, phase=0):
         """
